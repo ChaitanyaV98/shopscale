@@ -5,6 +5,11 @@
 **An e-commerce backend built for flash-sale traffic: orders, inventory and payments as independent
 services that stay consistent when thousands of buyers race for a hundred units.**
 
+**Live demo: [shopscale.onrender.com/dashboard](https://shopscale.onrender.com/dashboard)**. Press
+*Run a flash sale*: 600 simulated buyers race for 50 units through the real services (one sale every
+5 minutes for the whole site). It's on a free tier, so the first visit after a quiet spell takes about
+a minute to wake up.
+
 ![ShopScale demo: the same flash sale twice. Naive stock updates sell 307 units of 100; with SELECT … FOR UPDATE exactly 100 sell and the stock count adds up](docs/demo.gif)
 
 *The same 2,000-buyer flash sale twice, on the live dashboard (`localhost:4000/dashboard`): first with a
@@ -135,6 +140,29 @@ Redpanda and Redis run in-cluster as single-replica dev stand-ins for managed se
 - Out-of-order events still end in the right state
 - 100 concurrent requests on a 10-token bucket → exactly 10 admitted
 - CI also builds the image, starts the full stack with Kafka, and runs the end-to-end smoke test
+
+## Deployment (free tiers)
+
+| Piece | Where |
+|---|---|
+| All four services, one container (`SERVICE=all`) | Render free web service, Singapore ([`render.yaml`](render.yaml)) |
+| Postgres, one database per service | Neon, Singapore |
+| Kafka | Aiven free tier (TLS client certificates, 2 partitions per topic) |
+| Redis | Render Key Value (free) |
+
+On the live site, a 600-buyer sale for 50 units settles in about 45 seconds with 0 oversold.
+
+Deploying found three problems that the laptop setup hid:
+
+- **Connection-pool deadlock.** Payments held a database transaction open while calling the payment
+  provider, which needed a second connection from the same pool. With a pool of 20 locally nobody
+  noticed; with the free tier's pool of 4 and 6 concurrent handlers, the consumer froze. The provider
+  call now happens before the transaction opens (regression test: 12 charges on 2 connections).
+- **Restocking deleted live reservations.** A restock during an in-flight sale removed reservations
+  that compensation still needed. Restocks no longer delete anything.
+- **Neon roles could read each other's databases.** Roles created through Neon's API get broad
+  privileges, so the app now connects as SQL-created roles that can only read and write rows in their
+  own database (no cross-database access, no DDL); migrations run separately as the owner.
 
 ## Project layout
 
