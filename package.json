@@ -15,7 +15,8 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint",
     "test": "vitest run",
-    "test:int": "vitest run --config vitest.int.config.ts"
+    "test:int": "vitest run --config vitest.int.config.ts",
+    "loadtest": "bash scripts/loadtest.sh"
   },
   "license": "MIT",
   "type": "module",
