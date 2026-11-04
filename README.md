@@ -5,6 +5,11 @@
 **An e-commerce backend built for flash-sale traffic: orders, inventory and payments as independent
 services that stay consistent when thousands of buyers race for a hundred units.**
 
+![ShopScale demo: the same flash sale twice. Naive stock updates sell 307 units of 100; with SELECT … FOR UPDATE exactly 100 sell and the stock count adds up](docs/demo.gif)
+
+*The same 2,000-buyer flash sale twice, on the live dashboard (`localhost:4000/dashboard`): first with a
+naive read-then-write, then with row locks.*
+
 ## Results
 
 k6, 2,000 buyers racing for 100 units through the gateway, while 5 bots hammer it (one 8 GB laptop
@@ -12,8 +17,8 @@ running every service, Postgres, Redpanda and Redis):
 
 | | Naive stock update (read, then write) | **ShopScale (`SELECT … FOR UPDATE`)** |
 |---|---|---|
-| Orders confirmed for 100 units | 440 | **100** |
-| Units oversold | 340 | **0** (every run) |
+| Orders confirmed for 100 units | 307–440 (varies per run) | **100** |
+| Units oversold | 207–340 | **0** (every run) |
 | Stock count consistent afterwards | no | **yes** |
 | Buyer orders accepted | 2,000 / 2,000 | **2,000 / 2,000** |
 | Bot requests rate-limited (429) | | **~70%** (699 of 994) |
@@ -106,6 +111,7 @@ Customers whose id starts with `declined` always have their card declined, to se
 | `npm run loadtest` | k6 flash sale (Docker image) + report: oversold, stock consistency, latency |
 | `RESERVATION_MODE=naive npm run dev` then `MODE=naive npm run loadtest` | The same test without the row lock, to watch it oversell |
 | `bash scripts/smoke.sh` | End-to-end: order confirmed, declined payment compensated |
+| `localhost:4000/dashboard` | Live flash-sale dashboard (watch it during `npm run loadtest`) |
 
 ### Kubernetes
 
