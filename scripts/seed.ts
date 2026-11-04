@@ -19,15 +19,17 @@ const [sku, stock] = process.argv.slice(2);
 if (sku) {
   await sql.begin(async (tx) => {
     await tx`delete from reservations where sku = ${sku}`;
-    const r = await tx`update products set available = ${Number(stock ?? 100)} where sku = ${sku}`;
+    const units = Number(stock ?? 100);
+    const r = await tx`update products set available = ${units}, restocked_at = now(), restocked_with = ${units} where sku = ${sku}`;
     if (r.count === 0) throw new Error(`Unknown SKU ${sku}`);
   });
   console.log(`${sku} reset to ${stock ?? 100} units`);
 } else {
   for (const p of PRODUCTS) {
     await sql`
-      insert into products ${sql(p)}
-      on conflict (sku) do update set name = excluded.name, price_cents = excluded.price_cents, available = excluded.available
+      insert into products ${sql({ ...p, restocked_with: p.available })}
+      on conflict (sku) do update set name = excluded.name, price_cents = excluded.price_cents, available = excluded.available,
+        restocked_at = now(), restocked_with = excluded.available
     `;
   }
   console.log(`seeded ${PRODUCTS.length} products`);
