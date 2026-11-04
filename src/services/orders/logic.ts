@@ -53,12 +53,22 @@ export async function placeOrder(sql: Sql, input: PlaceOrderInput): Promise<Plac
   }
 }
 
+export interface OrderView {
+  id: string;
+  customer_id: string;
+  status: OrderStatus;
+  cancel_reason: string | null;
+  total_cents: number | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
 export async function getOrder(sql: Sql, id: string) {
-  const [order] = await sql`
+  const [order] = await sql<OrderView[]>`
     select id, customer_id, status, cancel_reason, total_cents, created_at, updated_at from orders where id = ${id}
   `;
   if (!order) return null;
-  const items = await sql`select sku, quantity from order_items where order_id = ${id} order by sku`;
+  const items = await sql<{ sku: string; quantity: number }[]>`select sku, quantity from order_items where order_id = ${id} order by sku`;
   return { ...order, items };
 }
 

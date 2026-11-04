@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { makeEvent } from "../../lib/events.ts";
+import { makeEvent, type Envelope } from "../../lib/events.ts";
 import { nextStatus, requestHash, type OrderStatus } from "./logic.ts";
 
 const id = "00000000-0000-4000-8000-000000000001";
@@ -9,7 +9,7 @@ const captured = makeEvent("PaymentCaptured", id, { paymentId: id, amountCents: 
 const failed = makeEvent("PaymentFailed", id, { reason: "card_declined" });
 
 describe("order state machine", () => {
-  it.each<[OrderStatus, typeof reserved, OrderStatus | null]>([
+  it.each<[OrderStatus, Envelope, OrderStatus | null]>([
     ["PENDING", reserved, "RESERVED"],
     ["PENDING", rejected, "CANCELLED"],
     ["RESERVED", captured, "CONFIRMED"],
