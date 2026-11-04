@@ -48,5 +48,56 @@ services:
       timeout: 3s
       retries: 20
 
+  # ── Application (opt in with: docker compose --profile app up --build) ──────────────────────
+  migrate:
+    profiles: [app]
+    build: .
+    image: shopscale:dev
+    command: ["sh", "-c", "node scripts/migrate.ts && node scripts/seed.ts"]
+    environment: &app-env
+      KAFKA_BROKERS: redpanda:9092
+      REDIS_URL: redis://redis:6379
+      ORDERS_DATABASE_URL: postgres://orders_svc:orders_svc@postgres:5432/orders
+      INVENTORY_DATABASE_URL: postgres://inventory_svc:inventory_svc@postgres:5432/inventory
+      PAYMENTS_DATABASE_URL: postgres://payments_svc:payments_svc@postgres:5432/payments
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  orders:
+    profiles: [app]
+    image: shopscale:dev
+    environment: { <<: *app-env, SERVICE: orders }
+    depends_on: &app-deps
+      migrate: { condition: service_completed_successfully }
+      redpanda: { condition: service_healthy }
+
+  inventory:
+    profiles: [app]
+    image: shopscale:dev
+    environment: { <<: *app-env, SERVICE: inventory, RESERVATION_MODE: "${RESERVATION_MODE:-locked}" }
+    depends_on: *app-deps
+
+  payments:
+    profiles: [app]
+    image: shopscale:dev
+    environment: { <<: *app-env, SERVICE: payments }
+    depends_on: *app-deps
+
+  gateway:
+    profiles: [app]
+    image: shopscale:dev
+    environment:
+      <<: *app-env
+      SERVICE: gateway
+      ORDERS_URL: http://orders:4001
+      INVENTORY_URL: http://inventory:4002
+      PAYMENTS_URL: http://payments:4003
+    ports: ["4000:4000"] # the only public port
+    depends_on:
+      orders: { condition: service_started }
+      inventory: { condition: service_started }
+      payments: { condition: service_started }
+      redis: { condition: service_healthy }
+
 volumes:
   pgdata:
