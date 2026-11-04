@@ -3,15 +3,22 @@
  * Applied files are recorded in schema_migrations, so running this again only applies new ones.
  *
  *   npm run migrate
+ *
+ * If <SERVICE>_OWNER_URL is set (production), migrations run as that owner role instead of the
+ * app's DML-only role.
  */
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { connect } from "../src/lib/db.ts";
-import type { ServiceName } from "../src/lib/config.ts";
+import { config, type ServiceName } from "../src/lib/config.ts";
 
 const SERVICES: ServiceName[] = ["orders", "inventory", "payments"];
 
 async function migrate(service: ServiceName) {
+  // In production the app connects as a DML-only role; schema changes need the owner role.
+  // (config is read once at import, so override it directly rather than via process.env)
+  const ownerUrl = process.env[`${service.toUpperCase()}_OWNER_URL`];
+  if (ownerUrl) config.databases[service] = ownerUrl;
   const sql = connect(service, 1);
   try {
     await sql`create table if not exists schema_migrations (name text primary key, applied_at timestamptz not null default now())`;

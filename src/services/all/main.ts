@@ -12,7 +12,9 @@ const step = (script: string) => {
   if (r.status !== 0) process.exit(r.status ?? 1);
 };
 
-step("scripts/migrate.ts");
+// Off in production, where the app's database role can't change the schema (migrations run
+// separately with the owner role).
+if (process.env.MIGRATE_ON_START !== "false") step("scripts/migrate.ts");
 if (process.env.SEED_ON_START !== "false") step("scripts/seed.ts");
 
 const env = { ...process.env, GATEWAY_PORT: process.env.PORT ?? process.env.GATEWAY_PORT ?? "4000" };
