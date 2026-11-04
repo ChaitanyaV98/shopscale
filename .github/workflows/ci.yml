@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    name: Lint, typecheck, unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with: { node-version: 24, cache: npm }
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+
+  integration:
+    name: Consistency + rate-limit tests (real Postgres, Redis)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env: { POSTGRES_USER: shopscale, POSTGRES_PASSWORD: shopscale, POSTGRES_DB: postgres }
+        ports: ["5436:5432"]
+        options: --health-cmd "pg_isready -U shopscale" --health-interval 2s --health-timeout 3s --health-retries 30
+      redis:
+        image: redis:7-alpine
+        ports: ["6381:6379"]
+        options: --health-cmd "redis-cli ping" --health-interval 2s --health-timeout 3s --health-retries 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with: { node-version: 24, cache: npm }
+      - run: npm ci
+      - name: Databases, users, migrations, seed
+        run: |
+          PGPASSWORD=shopscale psql -h localhost -p 5436 -U shopscale -d postgres -v ON_ERROR_STOP=1 -f deploy/k8s/postgres-init.sql
+          npm run migrate
+          npm run seed
+      - run: npm run test:int
+
+  e2e:
+    name: Full stack in Docker Compose (Kafka included)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build and start everything
+        run: docker compose --profile app up -d --build --wait --wait-timeout 300 gateway
+      - name: Order flow, payment decline and compensation
+        run: bash scripts/smoke.sh
+      - name: Logs on failure
+        if: failure()
+        run: docker compose --profile app logs --tail 100
