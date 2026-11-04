@@ -11,6 +11,9 @@ await runService({
   routes: (app, { sql }) => {
     app.get("/products", async () => sql`select sku, name, price_cents, available from products order by sku`);
 
+    // Which reservation strategy is running (shown on the dashboard so a recording can't mislabel it).
+    app.get("/mode", async () => ({ reservationMode: config.reservationMode }));
+
     // Stock plus what is currently reserved — the load test uses this to check for oversells.
     app.get<{ Params: { sku: string } }>("/products/:sku", async (req, reply) => {
       const [row] = await sql`

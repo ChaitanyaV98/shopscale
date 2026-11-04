@@ -39,6 +39,17 @@ await runService({
         .send({ orderId: result.orderId, status: result.status });
     });
 
+    // Order counts by status for one SKU since a moment in time (feeds the flash-sale dashboard).
+    app.get<{ Querystring: { sku?: string; since?: string } }>("/stats", async (req, reply) => {
+      const sku = req.query.sku ?? "FLASH-1";
+      const since = new Date(req.query.since ?? 0);
+      if (Number.isNaN(since.getTime())) return reply.code(400).send({ error: "Bad since" });
+      const rows = await sql<{ status: string; n: number }[]>`
+        select o.status, count(*)::int as n from orders o join order_items i on i.order_id = o.id
+        where i.sku = ${sku} and o.created_at >= ${since} group by o.status`;
+      return Object.fromEntries(rows.map((r) => [r.status, r.n]));
+    });
+
     app.get<{ Params: { id: string } }>("/orders/:id", async (req, reply) => {
       if (!z.string().uuid().safeParse(req.params.id).success) return reply.code(400).send({ error: "Bad order id" });
       const order = await getOrder(sql, req.params.id);

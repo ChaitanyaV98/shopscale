@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ShopScale · flash sale</title>
+<style>
+  :root { --bg:#0b0d12; --card:#151922; --line:#232838; --fg:#e8ebf2; --muted:#8b93a7; --green:#22c55e; --red:#ef4444; --amber:#f59e0b; --blue:#60a5fa; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.4 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 980px; margin: 0 auto; padding: 32px 24px; }
+  header { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom: 24px; }
+  h1 { margin:0; font-size: 22px; } h1 span { color: var(--muted); font-weight: 500; }
+  .mode { padding:6px 14px; border-radius:999px; font-weight:700; letter-spacing:.04em; font-size:13px; }
+  .mode.locked { background: rgba(34,197,94,.15); color: var(--green); border:1px solid rgba(34,197,94,.4); }
+  .mode.naive { background: rgba(239,68,68,.15); color: var(--red); border:1px solid rgba(239,68,68,.4); }
+  .sub { color: var(--muted); margin: -12px 0 24px; }
+  .bar-wrap { background: var(--card); border:1px solid var(--line); border-radius: 14px; padding: 18px 20px; margin-bottom: 18px; }
+  .bar-label { display:flex; justify-content:space-between; color: var(--muted); font-size: 13px; margin-bottom: 8px; }
+  .bar { position:relative; height: 26px; background: #0f1219; border-radius: 8px; overflow: hidden; }
+  .bar > div { position:absolute; top:0; bottom:0; left:0; transition: width .25s; }
+  .sold { background: linear-gradient(90deg, #3b82f6, #60a5fa); }
+  .over { background: repeating-linear-gradient(45deg, #ef4444, #ef4444 8px, #b91c1c 8px, #b91c1c 16px); }
+  .cap { position:absolute; top:-4px; bottom:-4px; width:2px; background: var(--fg); }
+  .grid { display:grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+  .card { background: var(--card); border:1px solid var(--line); border-radius: 14px; padding: 16px 18px; }
+  .card .k { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+  .card .v { font-size: 34px; font-weight: 700; font-variant-numeric: tabular-nums; margin-top: 4px; }
+  .big { grid-column: span 2; }
+  .good .v { color: var(--green); } .bad .v { color: var(--red); } .warn .v { color: var(--amber); } .info .v { color: var(--blue); }
+  .verdict { margin-top: 18px; padding: 14px 18px; border-radius: 12px; font-weight: 600; text-align:center; font-size: 17px; }
+  .verdict.ok { background: rgba(34,197,94,.12); color: var(--green); border: 1px solid rgba(34,197,94,.35); }
+  .verdict.bad { background: rgba(239,68,68,.12); color: var(--red); border: 1px solid rgba(239,68,68,.35); }
+  .verdict.wait { background: #121621; color: var(--muted); border: 1px solid var(--line); }
+  footer { margin-top: 18px; color: var(--muted); font-size: 12px; text-align:center; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Flash sale <span>· <span id="units">100</span> units of FLASH-1</span></h1>
+    <div id="mode" class="mode">…</div>
+  </header>
+  <p class="sub" id="desc">Buyers race through the gateway → orders → Kafka → inventory → payments.</p>
+
+  <div class="bar-wrap">
+    <div class="bar-label"><span>Units sold (reserved)</span><span id="barText">0 / 100</span></div>
+    <div class="bar"><div class="sold" id="sold"></div><div class="over" id="over"></div><div class="cap" id="cap"></div></div>
+  </div>
+
+  <div class="grid">
+    <div class="card info"><div class="k">Orders placed</div><div class="v" id="placed">0</div></div>
+    <div class="card good"><div class="k">Confirmed</div><div class="v" id="confirmed">0</div></div>
+    <div class="card"><div class="k">Sold out → cancelled</div><div class="v" id="cancelled">0</div></div>
+    <div class="card warn"><div class="k">In flight</div><div class="v" id="open">0</div></div>
+    <div class="card big" id="overCard"><div class="k">Units oversold</div><div class="v" id="oversold">0</div></div>
+    <div class="card big" id="consCard"><div class="k">Stock count adds up</div><div class="v" id="consistent">—</div></div>
+  </div>
+
+  <div class="verdict wait" id="verdict">Waiting for buyers…</div>
+  <footer>github.com/ChaitanyaV98/shopscale</footer>
+</main>
+<script>
+  const params = new URLSearchParams(location.search);
+  const stock = Number(params.get("stock") || 100);
+  const since = params.get("since") || new Date().toISOString();
+  document.getElementById("units").textContent = stock;
+  const $ = (id) => document.getElementById(id);
+
+  async function tick() {
+    try {
+      const d = await (await fetch(`/dashboard/data?since=${encodeURIComponent(since)}`)).json();
+      const naive = d.mode === "naive";
+      $("mode").textContent = naive ? "NAIVE: read, then write" : "LOCKED: SELECT … FOR UPDATE";
+      $("mode").className = "mode " + (naive ? "naive" : "locked");
+      const o = d.orders, placed = (o.PENDING||0)+(o.RESERVED||0)+(o.CONFIRMED||0)+(o.CANCELLED||0);
+      const inFlight = (o.PENDING||0)+(o.RESERVED||0);
+      const oversold = Math.max(0, d.reserved - stock);
+      const scale = Math.max(stock, d.reserved) * 1.05;
+      $("sold").style.width = (Math.min(d.reserved, stock) / scale * 100) + "%";
+      $("over").style.left = (stock / scale * 100) + "%";
+      $("over").style.width = (oversold / scale * 100) + "%";
+      $("cap").style.left = (stock / scale * 100) + "%";
+      $("barText").textContent = `${d.reserved} / ${stock}`;
+      $("placed").textContent = placed.toLocaleString();
+      $("confirmed").textContent = (o.CONFIRMED||0).toLocaleString();
+      $("cancelled").textContent = (o.CANCELLED||0).toLocaleString();
+      $("open").textContent = inFlight.toLocaleString();
+      $("oversold").textContent = oversold;
+      $("overCard").className = "card big " + (oversold > 0 ? "bad" : "good");
+      const consistent = d.available + d.reserved === stock;
+      $("consistent").textContent = consistent ? "yes" : `no (${d.available} + ${d.reserved} ≠ ${stock})`;
+      $("consCard").className = "card big " + (consistent ? "good" : "bad");
+      const v = $("verdict");
+      if (placed === 0) { v.className = "verdict wait"; v.textContent = "Waiting for buyers…"; }
+      else if (inFlight > 0) { v.className = "verdict wait"; v.textContent = `Processing… ${inFlight.toLocaleString()} orders in flight`; }
+      else if (oversold > 0) { v.className = "verdict bad"; v.textContent = `Oversold: ${d.reserved} units sold, only ${stock} existed (lost updates)`; }
+      else { v.className = "verdict ok"; v.textContent = `Sold out at exactly ${stock}. 0 oversold, stock count consistent.`; }
+    } catch {}
+    setTimeout(tick, 300);
+  }
+  tick();
+</script>
+</body>
+</html>

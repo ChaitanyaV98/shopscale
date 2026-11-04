@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import Fastify from "fastify";
 import { Redis } from "ioredis";
 import { config } from "../../lib/config.ts";
@@ -25,6 +26,21 @@ const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? "warn" }, trustP
 
 app.get("/health", async () => ({ ok: true, service: "gateway", redis: redis.status }));
 
+// Flash-sale dashboard: a read-only view of one SKU's sale (used for the demo recording).
+const dashboardHtml = readFileSync(new URL("./dashboard.html", import.meta.url), "utf8");
+app.get("/dashboard", async (_req, reply) => reply.type("text/html").send(dashboardHtml));
+app.get<{ Querystring: { since?: string; sku?: string } }>("/dashboard/data", async (req) => {
+  const sku = encodeURIComponent(req.query.sku ?? "FLASH-1");
+  const since = encodeURIComponent(req.query.since ?? new Date(0).toISOString());
+  const get = async (url: string) => (await fetch(url, { signal: AbortSignal.timeout(3000) })).json();
+  const [orders, product, mode] = await Promise.all([
+    get(`${upstream.orders}/stats?sku=${sku}&since=${since}`),
+    get(`${upstream.inventory}/products/${sku}`),
+    get(`${upstream.inventory}/mode`),
+  ]);
+  return { orders, available: product.available, reserved: product.reserved, mode: mode.reservationMode };
+});
+
 /**
  * Who is this client? In production: the user id from a verified auth token. This demo has no auth,
  * so it uses an X-Customer-Id header (simulating that token), falling back to the client IP.
@@ -35,7 +51,7 @@ const clientKey = (headers: Record<string, unknown>, ip: string) => {
 };
 
 app.addHook("onRequest", async (req, reply) => {
-  if (req.url === "/health") return;
+  if (req.url === "/health" || req.url.startsWith("/dashboard")) return; // monitoring isn't customer traffic
   const bucket = req.method === "GET" ? READ : WRITE;
   const kind = req.method === "GET" ? "read" : "write";
   try {
