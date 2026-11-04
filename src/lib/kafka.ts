@@ -4,8 +4,35 @@ import { parseEvent, TOPICS, type Envelope } from "./events.ts";
 
 const { KafkaJS } = kafkaPkg;
 
-const kafka = () =>
-  new KafkaJS.Kafka({ kafkaJS: { brokers: config.kafkaBrokers, clientId: "shopscale", logLevel: KafkaJS.logLevel.ERROR } });
+/**
+ * Connection settings. Locally: plain TCP to Redpanda. Hosted Kafka (e.g. Aiven) needs TLS plus either
+ * SASL/SCRAM credentials or a client certificate — all from env vars, PEM contents passed inline.
+ */
+function kafkaConfig() {
+  const env = process.env;
+  const tls = env.KAFKA_SSL === "true" || Boolean(env.KAFKA_SSL_CA);
+  const sasl = env.KAFKA_SASL_USERNAME
+    ? {
+        mechanism: (env.KAFKA_SASL_MECHANISM ?? "scram-sha-256") as "scram-sha-256",
+        username: env.KAFKA_SASL_USERNAME,
+        password: env.KAFKA_SASL_PASSWORD ?? "",
+      }
+    : undefined;
+  return {
+    kafkaJS: {
+      brokers: config.kafkaBrokers,
+      clientId: "shopscale",
+      logLevel: KafkaJS.logLevel.ERROR,
+      ssl: tls,
+      ...(sasl ? { sasl } : {}),
+    },
+    // librdkafka settings (outside the kafkaJS block): CA and optional client certificate.
+    ...(env.KAFKA_SSL_CA ? { "ssl.ca.pem": env.KAFKA_SSL_CA } : {}),
+    ...(env.KAFKA_SSL_CERT ? { "ssl.certificate.pem": env.KAFKA_SSL_CERT, "ssl.key.pem": env.KAFKA_SSL_KEY ?? "" } : {}),
+  };
+}
+
+const kafka = () => new KafkaJS.Kafka(kafkaConfig() as ConstructorParameters<typeof KafkaJS.Kafka>[0]);
 
 export interface Producer {
   send: (messages: { topic: string; key: string; value: string }[]) => Promise<void>;
@@ -67,7 +94,7 @@ export async function consume(opts: {
 }
 
 /** Create topics with enough partitions for parallelism (idempotent). */
-export async function ensureTopics(partitions = 6) {
+export async function ensureTopics(partitions = Number(process.env.KAFKA_PARTITIONS ?? 6)) {
   const admin = kafka().admin();
   await admin.connect();
   const existing = new Set(await admin.listTopics());

@@ -5,7 +5,7 @@ export type Sql = postgres.Sql;
 export type Tx = postgres.TransactionSql;
 
 /** A connection pool to one service's own database. */
-export function connect(service: ServiceName, max = 20): Sql {
+export function connect(service: ServiceName, max = Number(process.env.DB_POOL_MAX ?? 20)): Sql {
   return postgres(config.databases[service], {
     max,
     onnotice: () => {},
