@@ -3,7 +3,7 @@ import { config } from "../../lib/config.ts";
 import { connect } from "../../lib/db.ts";
 import { TOPICS, type Envelope } from "../../lib/events.ts";
 import { runService } from "../../lib/service.ts";
-import { chargeOrder } from "./logic.ts";
+import { chargeForOrder, recordPayment, type Charge } from "./logic.ts";
 
 const sql = connect("payments");
 
@@ -22,7 +22,8 @@ await runService({
     {
       topics: [TOPICS.inventory],
       types: ["StockReserved"],
-      handle: (_ctx, event, tx) => chargeOrder(sql, tx, event as Envelope<"StockReserved">),
+      prepare: (_ctx, event) => chargeForOrder(sql, event as Envelope<"StockReserved">),
+      handle: (_ctx, event, tx, charge) => recordPayment(tx, event as Envelope<"StockReserved">, charge as Charge),
     },
   ],
 });

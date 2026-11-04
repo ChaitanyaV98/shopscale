@@ -26,15 +26,22 @@ export async function providerCharge(sql: Sql, idempotencyKey: string, amountCen
   return { chargeId: existing!.charge_id, succeeded: existing!.succeeded, replayed: true };
 }
 
+export type Charge = Awaited<ReturnType<typeof providerCharge>>;
+
 /**
- * Charge for a reserved order.
+ * Step 1, OUTSIDE any database transaction: ask the provider to charge.
  *
- * The provider call happens before our transaction commits. If we crash in between, Kafka
- * redelivers StockReserved, we call the provider again with the SAME key (the order id), and it
- * returns the original charge — so the customer is never charged twice.
+ * Holding a transaction open across a network call is a classic mistake: the connection sits idle
+ * for the whole call, and if the call needs another connection from the same pool, a small pool
+ * deadlocks (this happened with a 4-connection pool and 6 concurrent handlers). The order id is the
+ * idempotency key, so calling again after a crash or redelivery returns the original charge.
  */
-export async function chargeOrder(sql: Sql, tx: Tx, event: Envelope<"StockReserved">) {
-  const charge = await providerCharge(sql, `order:${event.orderId}`, event.data.amountCents, event.data.customerId);
+export function chargeForOrder(sql: Sql, event: Envelope<"StockReserved">): Promise<Charge> {
+  return providerCharge(sql, `order:${event.orderId}`, event.data.amountCents, event.data.customerId);
+}
+
+/** Step 2, inside the inbox transaction: record the outcome and emit the event. */
+export async function recordPayment(tx: Tx, event: Envelope<"StockReserved">, charge: Charge) {
   const status = charge.succeeded ? "captured" : "failed";
   const [row] = await tx`
     insert into payments (order_id, payment_id, amount_cents, status, failure_reason)

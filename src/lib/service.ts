@@ -14,7 +14,12 @@ export interface Subscription {
   topics: string[];
   /** Event types this service reacts to; everything else on those topics is ignored. */
   types: Envelope["type"][];
-  handle: (ctx: ServiceContext, event: Envelope, tx: Tx) => Promise<void>;
+  /**
+   * Optional work done BEFORE the inbox transaction opens (e.g. calling an external API), so no
+   * database connection is held during it. Must be idempotent: it runs again on redelivery.
+   */
+  prepare?: (ctx: ServiceContext, event: Envelope) => Promise<unknown>;
+  handle: (ctx: ServiceContext, event: Envelope, tx: Tx, prepared: unknown) => Promise<void>;
 }
 
 /**
@@ -49,7 +54,8 @@ export async function runService(opts: {
         topics: sub.topics,
         handle: async (event) => {
           if (!sub.types.includes(event.type)) return;
-          const fresh = await handleOnce(opts.sql, event, (tx) => sub.handle(ctx, event, tx));
+          const prepared = sub.prepare ? await sub.prepare(ctx, event) : undefined;
+          const fresh = await handleOnce(opts.sql, event, (tx) => sub.handle(ctx, event, tx, prepared));
           if (fresh) relay.wake(); // publish the events this one caused right away
         },
       }),

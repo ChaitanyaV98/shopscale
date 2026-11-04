@@ -9,7 +9,7 @@ import { makeEvent, type Envelope } from "../lib/events.ts";
 import { handleOnce } from "../lib/inbox.ts";
 import { releaseStock, reserveStock } from "./inventory/logic.ts";
 import { applyEvent, getOrder, placeOrder } from "./orders/logic.ts";
-import { chargeOrder } from "./payments/logic.ts";
+import { chargeForOrder, recordPayment } from "./payments/logic.ts";
 
 const orders = connect("orders");
 const inventory = connect("inventory");
@@ -91,18 +91,45 @@ describe("payments", () => {
     const orderId = randomUUID();
     const e = makeEvent("StockReserved", orderId, { amountCents: 2500, customerId: "alice" });
     // Simulate a crash after the provider call: the first transaction rolls back, the event is redelivered.
+    const ev = e as Envelope<"StockReserved">;
+    const first = await chargeForOrder(payments, ev);
     await payments
       .begin(async (tx) => {
-        await chargeOrder(payments, tx, e as Envelope<"StockReserved">);
+        await recordPayment(tx, ev, first);
         throw new Error("crash before commit");
       })
       .catch(() => {});
-    await payments.begin((tx) => chargeOrder(payments, tx, e as Envelope<"StockReserved">));
+    const retry = await chargeForOrder(payments, ev); // redelivery: same idempotency key
+    expect(retry.chargeId).toBe(first.chargeId);
+    expect(retry.replayed).toBe(true);
+    await payments.begin((tx) => recordPayment(tx, ev, retry));
 
     const charges = await payments`select count(*)::int as n from provider_charges where idempotency_key = ${`order:${orderId}`}`;
     const rows = await payments`select status from payments where order_id = ${orderId}`;
     expect(charges[0]!.n).toBe(1);
     expect(rows.map((r) => r.status)).toEqual(["captured"]);
+  });
+});
+
+describe("connection pool", () => {
+  it("payments doesn't deadlock a tiny pool: 12 concurrent charges on 2 connections", async () => {
+    // Regression: charging used to hold a transaction while asking the pool for a second
+    // connection; with more concurrent handlers than connections, everything froze.
+    const tiny = connect("payments", 2);
+    const events = Array.from({ length: 12 }, () =>
+      makeEvent("StockReserved", randomUUID(), { amountCents: 100, customerId: "pool" }) as Envelope<"StockReserved">,
+    );
+    const work = Promise.all(
+      events.map(async (ev) => {
+        const charge = await chargeForOrder(tiny, ev);
+        await handleOnce(tiny, ev, (tx) => recordPayment(tx, ev, charge));
+      }),
+    );
+    const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error("deadlocked")), 10_000));
+    await Promise.race([work, timeout]);
+    const rows = await tiny`select count(*)::int as n from payments where order_id in ${tiny(events.map((e) => e.orderId))}`;
+    expect(rows[0]!.n).toBe(12);
+    await tiny.end();
   });
 });
 
