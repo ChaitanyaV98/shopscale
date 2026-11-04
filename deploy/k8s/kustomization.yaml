@@ -1,0 +1,16 @@
+# kubectl apply -k deploy/k8s   (see deploy/README.md for the kind walkthrough)
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: shopscale
+resources:
+  - namespace.yaml
+  - infra.yaml
+  - config.yaml
+  - migrate-job.yaml
+  - services.yaml
+configMapGenerator:
+  - name: postgres-init
+    files:
+      - init.sql=postgres-init.sql
+generatorOptions:
+  disableNameSuffixHash: true

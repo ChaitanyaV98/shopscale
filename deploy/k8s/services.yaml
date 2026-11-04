@@ -1,0 +1,116 @@
+# The four application services. Only the gateway is meant to be exposed (port-forward or an Ingress).---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: gateway }
+spec:
+  replicas: 2   # two of everything: SKIP LOCKED relays, consumer groups and row locks make that safe
+  selector: { matchLabels: { app: gateway } }
+  template:
+    metadata: { labels: { app: gateway } }
+    spec:
+      terminationGracePeriodSeconds: 30   # SIGTERM → stop HTTP, stop consuming, flush outbox
+      # Kubernetes injects Docker-link-style env vars per Service (e.g. ORDERS_PORT=tcp://10.96.0.12:4001),
+      # which collide with our own ORDERS_PORT setting. We use DNS names instead, so turn them off.
+      enableServiceLinks: false
+      containers:
+        - name: gateway
+          image: shopscale:dev
+          imagePullPolicy: IfNotPresent
+          env: [{ name: SERVICE, value: gateway }]
+          envFrom: [{ configMapRef: { name: shopscale-config } }, { secretRef: { name: shopscale-db } }]
+          ports: [{ containerPort: 4000 }]
+          readinessProbe: { httpGet: { path: /health, port: 4000 }, periodSeconds: 5 }
+          livenessProbe: { httpGet: { path: /health, port: 4000 }, initialDelaySeconds: 20, periodSeconds: 10 }
+          resources: { requests: { cpu: 50m, memory: 96Mi }, limits: { memory: 256Mi } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: gateway }
+spec: { selector: { app: gateway }, ports: [{ port: 4000 }] }   # ClusterIP: internal only
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: orders }
+spec:
+  replicas: 2   # two of everything: SKIP LOCKED relays, consumer groups and row locks make that safe
+  selector: { matchLabels: { app: orders } }
+  template:
+    metadata: { labels: { app: orders } }
+    spec:
+      terminationGracePeriodSeconds: 30   # SIGTERM → stop HTTP, stop consuming, flush outbox
+      # Kubernetes injects Docker-link-style env vars per Service (e.g. ORDERS_PORT=tcp://10.96.0.12:4001),
+      # which collide with our own ORDERS_PORT setting. We use DNS names instead, so turn them off.
+      enableServiceLinks: false
+      containers:
+        - name: orders
+          image: shopscale:dev
+          imagePullPolicy: IfNotPresent
+          env: [{ name: SERVICE, value: orders }]
+          envFrom: [{ configMapRef: { name: shopscale-config } }, { secretRef: { name: shopscale-db } }]
+          ports: [{ containerPort: 4001 }]
+          readinessProbe: { httpGet: { path: /health, port: 4001 }, periodSeconds: 5 }
+          livenessProbe: { httpGet: { path: /health, port: 4001 }, initialDelaySeconds: 20, periodSeconds: 10 }
+          resources: { requests: { cpu: 50m, memory: 96Mi }, limits: { memory: 256Mi } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: orders }
+spec: { selector: { app: orders }, ports: [{ port: 4001 }] }   # ClusterIP: internal only
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: inventory }
+spec:
+  replicas: 2   # two of everything: SKIP LOCKED relays, consumer groups and row locks make that safe
+  selector: { matchLabels: { app: inventory } }
+  template:
+    metadata: { labels: { app: inventory } }
+    spec:
+      terminationGracePeriodSeconds: 30   # SIGTERM → stop HTTP, stop consuming, flush outbox
+      # Kubernetes injects Docker-link-style env vars per Service (e.g. ORDERS_PORT=tcp://10.96.0.12:4001),
+      # which collide with our own ORDERS_PORT setting. We use DNS names instead, so turn them off.
+      enableServiceLinks: false
+      containers:
+        - name: inventory
+          image: shopscale:dev
+          imagePullPolicy: IfNotPresent
+          env: [{ name: SERVICE, value: inventory }]
+          envFrom: [{ configMapRef: { name: shopscale-config } }, { secretRef: { name: shopscale-db } }]
+          ports: [{ containerPort: 4002 }]
+          readinessProbe: { httpGet: { path: /health, port: 4002 }, periodSeconds: 5 }
+          livenessProbe: { httpGet: { path: /health, port: 4002 }, initialDelaySeconds: 20, periodSeconds: 10 }
+          resources: { requests: { cpu: 50m, memory: 96Mi }, limits: { memory: 256Mi } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: inventory }
+spec: { selector: { app: inventory }, ports: [{ port: 4002 }] }   # ClusterIP: internal only
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: payments }
+spec:
+  replicas: 2   # two of everything: SKIP LOCKED relays, consumer groups and row locks make that safe
+  selector: { matchLabels: { app: payments } }
+  template:
+    metadata: { labels: { app: payments } }
+    spec:
+      terminationGracePeriodSeconds: 30   # SIGTERM → stop HTTP, stop consuming, flush outbox
+      # Kubernetes injects Docker-link-style env vars per Service (e.g. ORDERS_PORT=tcp://10.96.0.12:4001),
+      # which collide with our own ORDERS_PORT setting. We use DNS names instead, so turn them off.
+      enableServiceLinks: false
+      containers:
+        - name: payments
+          image: shopscale:dev
+          imagePullPolicy: IfNotPresent
+          env: [{ name: SERVICE, value: payments }]
+          envFrom: [{ configMapRef: { name: shopscale-config } }, { secretRef: { name: shopscale-db } }]
+          ports: [{ containerPort: 4003 }]
+          readinessProbe: { httpGet: { path: /health, port: 4003 }, periodSeconds: 5 }
+          livenessProbe: { httpGet: { path: /health, port: 4003 }, initialDelaySeconds: 20, periodSeconds: 10 }
+          resources: { requests: { cpu: 50m, memory: 96Mi }, limits: { memory: 256Mi } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: payments }
+spec: { selector: { app: payments }, ports: [{ port: 4003 }] }   # ClusterIP: internal only

@@ -1,0 +1,17 @@
+# Runs migrations (idempotent) and seeds the catalogue. Services start alongside it and restart
+# until their tables exist; readiness probes keep traffic away until they're healthy.
+apiVersion: batch/v1
+kind: Job
+metadata: { name: migrate }
+spec:
+  backoffLimit: 10
+  template:
+    spec:
+      restartPolicy: OnFailure
+      enableServiceLinks: false
+      containers:
+        - name: migrate
+          image: shopscale:dev
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "-c", "node scripts/migrate.ts && node scripts/seed.ts"]
+          envFrom: [{ configMapRef: { name: shopscale-config } }, { secretRef: { name: shopscale-db } }]
