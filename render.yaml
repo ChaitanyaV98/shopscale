@@ -1,0 +1,34 @@
+# Render Blueprint for the public demo: every service in one free container (SERVICE=all), plus a
+# free Key Value (Redis) instance. Postgres is Neon and Kafka is Aiven (both free tiers); their
+# credentials are entered in the Render dashboard (sync: false), never committed.
+services:
+  - type: web
+    name: shopscale
+    runtime: docker
+    plan: free
+    region: singapore
+    healthCheckPath: /health
+    envVars:
+      - { key: SERVICE, value: all }
+      - { key: MIGRATE_ON_START, value: "false" } # migrations run separately with the owner role
+      - { key: SEED_ON_START, value: "false" }
+      - { key: DB_POOL_MAX, value: "4" }
+      - { key: KAFKA_PARTITIONS, value: "2" } # Aiven free tier: up to 2 partitions per topic
+      - { key: DEMO_BUYERS, value: "600" }
+      - { key: DEMO_STOCK, value: "50" }
+      - key: REDIS_URL
+        fromService: { type: keyvalue, name: shopscale-redis, property: connectionString }
+      - { key: ORDERS_DATABASE_URL, sync: false }
+      - { key: INVENTORY_DATABASE_URL, sync: false }
+      - { key: PAYMENTS_DATABASE_URL, sync: false }
+      - { key: KAFKA_BROKERS, sync: false }
+      - { key: KAFKA_SSL_CA_BASE64, sync: false }
+      - { key: KAFKA_SSL_CERT_BASE64, sync: false }
+      - { key: KAFKA_SSL_KEY_BASE64, sync: false }
+
+  - type: keyvalue
+    name: shopscale-redis
+    plan: free
+    region: singapore
+    maxmemoryPolicy: allkeys-lru
+    ipAllowList: [] # reachable only from Render services
