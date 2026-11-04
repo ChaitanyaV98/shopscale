@@ -8,8 +8,17 @@ const { KafkaJS } = kafkaPkg;
  * Connection settings. Locally: plain TCP to Redpanda. Hosted Kafka (e.g. Aiven) needs TLS plus either
  * SASL/SCRAM credentials or a client certificate — all from env vars, PEM contents passed inline.
  */
+/** A PEM from VAR, or base64-encoded in VAR_BASE64 (easier to paste into a hosting dashboard). */
+const pem = (name: string) =>
+  process.env[name] ?? (process.env[`${name}_BASE64`] ? Buffer.from(process.env[`${name}_BASE64`]!, "base64").toString("utf8") : undefined);
+
 function kafkaConfig() {
-  const env = process.env;
+  const env: Record<string, string | undefined> = {
+    ...process.env,
+    KAFKA_SSL_CA: pem("KAFKA_SSL_CA"),
+    KAFKA_SSL_CERT: pem("KAFKA_SSL_CERT"),
+    KAFKA_SSL_KEY: pem("KAFKA_SSL_KEY"),
+  };
   const tls = env.KAFKA_SSL === "true" || Boolean(env.KAFKA_SSL_CA);
   const sasl = env.KAFKA_SASL_USERNAME
     ? {
