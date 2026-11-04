@@ -23,7 +23,7 @@ B→A and deadlock (tested). A naive mode (`RESERVATION_MODE=naive`) exists only
 ## Evidence (k6, 2,000 buyers for 100 units, same laptop)
 | Mode | Confirmed orders | Oversold | Stock consistent | Placed → final, p95 |
 |---|---|---|---|---|
-| naive (read, then write) | **440** | **340** | no | 2.9 s |
+| naive (read, then write) | **307–440** (varies per run) | **207–340** | no | 2.9 s |
 | locked (`FOR UPDATE`) | **100** | **0** | yes | 3.3–4.3 s |
 
 ## Consequences
