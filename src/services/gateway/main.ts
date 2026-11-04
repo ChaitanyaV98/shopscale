@@ -31,14 +31,61 @@ const dashboardHtml = readFileSync(new URL("./dashboard.html", import.meta.url),
 app.get("/dashboard", async (_req, reply) => reply.type("text/html").send(dashboardHtml));
 app.get<{ Querystring: { since?: string; sku?: string } }>("/dashboard/data", async (req) => {
   const sku = encodeURIComponent(req.query.sku ?? "FLASH-1");
-  const since = encodeURIComponent(req.query.since ?? new Date(0).toISOString());
   const get = async (url: string) => (await fetch(url, { signal: AbortSignal.timeout(3000) })).json();
-  const [orders, product, mode] = await Promise.all([
-    get(`${upstream.orders}/stats?sku=${sku}&since=${since}`),
-    get(`${upstream.inventory}/products/${sku}`),
-    get(`${upstream.inventory}/mode`),
-  ]);
-  return { orders, available: product.available, reserved: product.reserved, mode: mode.reservationMode };
+  const [product, mode] = await Promise.all([get(`${upstream.inventory}/products/${sku}`), get(`${upstream.inventory}/mode`)]);
+  // By default show the latest sale: everything ordered since the SKU was last restocked.
+  const since = req.query.since ?? product.restocked_at;
+  const orders = await get(`${upstream.orders}/stats?sku=${sku}&since=${encodeURIComponent(since)}`);
+  return {
+    orders,
+    available: product.available,
+    reserved: product.reserved,
+    initial: product.restocked_with,
+    since,
+    mode: mode.reservationMode,
+    demoCooldownMs: Math.max(0, await redis.pttl(DEMO_LOCK).catch(() => 0)),
+  };
+});
+
+/**
+ * "Run a flash sale" button on the public demo: restock DEMO_STOCK units, then send DEMO_BUYERS
+ * simulated buyers through the real orders service (and so through Kafka, inventory and payments).
+ * One run per DEMO_COOLDOWN_MS for the whole site, enforced in Redis, so visitors can't hammer the
+ * free-tier infrastructure. Fails closed: no Redis, no demo.
+ */
+const DEMO_LOCK = "demo:flash-sale";
+const DEMO_STOCK = Number(process.env.DEMO_STOCK ?? 50);
+const DEMO_BUYERS = Number(process.env.DEMO_BUYERS ?? 600);
+const DEMO_COOLDOWN_MS = Number(process.env.DEMO_COOLDOWN_MS ?? 5 * 60_000);
+
+app.post("/demo/flash-sale", async (_req, reply) => {
+  const acquired = await redis.set(DEMO_LOCK, "1", "PX", DEMO_COOLDOWN_MS, "NX").catch(() => null);
+  if (acquired !== "OK") {
+    const ms = await redis.pttl(DEMO_LOCK).catch(() => DEMO_COOLDOWN_MS);
+    return reply.code(429).send({ error: "A flash sale ran recently. Try again shortly.", retryAfterSeconds: Math.ceil(ms / 1000) });
+  }
+  const restock = await fetch(`${upstream.inventory}/admin/restock`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ sku: "FLASH-1", stock: DEMO_STOCK }),
+  });
+  if (!restock.ok) return reply.code(502).send({ error: "Could not restock" });
+  const run = Date.now().toString(36);
+  void (async () => {
+    let next = 0;
+    const worker = async () => {
+      while (next < DEMO_BUYERS) {
+        const i = next++;
+        await fetch(`${upstream.orders}/orders`, {
+          method: "POST",
+          headers: { "content-type": "application/json", "idempotency-key": `demo-${run}-${i}` },
+          body: JSON.stringify({ customerId: `demo-buyer-${run}-${i}`, items: [{ sku: "FLASH-1", quantity: 1 }] }),
+        }).catch(() => {});
+      }
+    };
+    await Promise.all(Array.from({ length: 40 }, worker)); // 40 concurrent buyers at a time
+  })();
+  return reply.code(202).send({ started: true, buyers: DEMO_BUYERS, stock: DEMO_STOCK });
 });
 
 /**

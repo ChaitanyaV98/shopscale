@@ -32,6 +32,10 @@
   .verdict.ok { background: rgba(34,197,94,.12); color: var(--green); border: 1px solid rgba(34,197,94,.35); }
   .verdict.bad { background: rgba(239,68,68,.12); color: var(--red); border: 1px solid rgba(239,68,68,.35); }
   .verdict.wait { background: #121621; color: var(--muted); border: 1px solid var(--line); }
+  .actions { display:flex; align-items:center; gap:14px; margin-top: 18px; }
+  button { background:#2563eb; color:white; border:0; border-radius:10px; padding:12px 18px; font-weight:600; font-size:15px; cursor:pointer; }
+  button:disabled { background:#1f2937; color: var(--muted); cursor: default; }
+  .note { color: var(--muted); font-size: 13px; }
   footer { margin-top: 18px; color: var(--muted); font-size: 12px; text-align:center; }
 </style>
 </head>
@@ -58,18 +62,34 @@
   </div>
 
   <div class="verdict wait" id="verdict">Waiting for buyers…</div>
+  <div class="actions" id="actions" hidden>
+    <button id="run">Run a flash sale</button>
+    <span class="note" id="runNote">600 simulated buyers race for 50 units through the real services. One sale every 5 minutes for the whole site.</span>
+  </div>
   <footer>github.com/ChaitanyaV98/shopscale</footer>
 </main>
 <script>
   const params = new URLSearchParams(location.search);
-  const stock = Number(params.get("stock") || 100);
-  const since = params.get("since") || new Date().toISOString();
-  document.getElementById("units").textContent = stock;
+  const fixedStock = params.get("stock") ? Number(params.get("stock")) : null; // recordings pin these
+  const fixedSince = params.get("since");
   const $ = (id) => document.getElementById(id);
+  if (params.get("demo") !== "0") $("actions").hidden = false;
+
+  $("run").onclick = async () => {
+    $("run").disabled = true;
+    const r = await fetch("/demo/flash-sale", { method: "POST" });
+    const body = await r.json().catch(() => ({}));
+    $("runNote").textContent = r.ok ? `Started: ${body.buyers} buyers for ${body.stock} units. Watch the numbers.` : (body.error || "Could not start");
+  };
 
   async function tick() {
     try {
-      const d = await (await fetch(`/dashboard/data?since=${encodeURIComponent(since)}`)).json();
+      const d = await (await fetch(`/dashboard/data${fixedSince ? `?since=${encodeURIComponent(fixedSince)}` : ""}`)).json();
+      const stock = fixedStock ?? d.initial ?? 100;
+      $("units").textContent = stock;
+      const cooling = d.demoCooldownMs > 0;
+      $("run").disabled = cooling;
+      $("run").textContent = cooling ? `Next sale in ${Math.ceil(d.demoCooldownMs / 1000)}s` : "Run a flash sale";
       const naive = d.mode === "naive";
       $("mode").textContent = naive ? "NAIVE: read, then write" : "LOCKED: SELECT … FOR UPDATE";
       $("mode").className = "mode " + (naive ? "naive" : "locked");

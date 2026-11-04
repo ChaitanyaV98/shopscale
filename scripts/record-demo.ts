@@ -19,7 +19,7 @@ const since = new Date().toISOString();
 
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1000, height: 640 }, colorScheme: "dark" });
-await page.goto(`http://localhost:4000/dashboard?stock=100&since=${encodeURIComponent(since)}`);
+await page.goto(`http://localhost:4000/dashboard?stock=100&demo=0&since=${encodeURIComponent(since)}`);
 await page.waitForTimeout(800);
 
 let n = 0;
