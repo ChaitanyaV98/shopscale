@@ -56,7 +56,10 @@ const EnvelopeShape = z.object({
   data: z.unknown(),
 });
 
-/** Validate a message from Kafka. Throws on anything malformed (it goes to the dead-letter log). */
+/**
+ * Validate a message from Kafka. Throws on anything malformed; the consumer (kafka.ts) then logs it
+ * with its topic/partition/offset and skips it. There is no dead-letter topic yet.
+ */
 export function parseEvent(raw: string): Envelope {
   const env = EnvelopeShape.parse(JSON.parse(raw));
   return { ...env, data: EventSchemas[env.type].parse(env.data) } as Envelope;

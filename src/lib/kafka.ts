@@ -90,8 +90,14 @@ export async function consume(opts: {
       try {
         event = parseEvent(raw);
       } catch (e) {
-        // A malformed message can never succeed; log it and move on instead of blocking the partition.
-        console.error(`[${opts.groupId}] skipping malformed message on ${topic}/${partition}:`, (e as Error).message);
+        // A malformed message can never succeed, so skip it instead of blocking the partition. It is
+        // only logged, not kept anywhere else: the topic/partition/offset in the log line is how to find
+        // it again (while Kafka still retains it). A dead-letter topic is the known next step.
+        console.error(
+          `[${opts.groupId}] skipping malformed message topic=${topic} partition=${partition} offset=${message.offset}` +
+            ` key=${message.key?.toString() ?? "-"}:`,
+          (e as Error).message,
+        );
         await consumer.commitOffsets([{ topic, partition, offset: String(Number(message.offset) + 1) }]);
         return;
       }
